@@ -8,7 +8,6 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 require('dotenv').config(); // Load environment variables
 const path = require("path") ;
-
 const app = express();
 const saltRounds = 10; // Salt rounds for password hashing
 
@@ -52,15 +51,7 @@ const Review = mongoose.model("Review", reviewSchema);
 // Middleware
 app.use(cors());
 app.use(express.json());
-
 app.use(express.static("build"));
-
-// app.get("*", (req, res) => {
-//     res.sendFile(path.join(__dirname, "build", "index.html"));
-// });
-
-
-
 // Temporary storage for file uploads
 const storage = multer.memoryStorage(); // Store in memory for Cloudinary
 const upload = multer({ storage });

@@ -49,7 +49,7 @@ const reviewSchema = new mongoose.Schema({
 const Review = mongoose.model("Review", reviewSchema);
 
 // Middleware
-app.use(cors());
+app.use(cors({origin:"*"}));
 app.use(express.json());
 app.use(express.static("build"));
 // Temporary storage for file uploads
@@ -131,67 +131,90 @@ app.post('/signin', async (req, res) => {
 });
 
 // Upload Review Route
-app.post("/upload", upload.fields([
-    { name: "images", maxCount: 10 },
-    { name: "videos", maxCount: 10 }
-]), async (req, res) => {
-    const { content, userId } = req.body;
-    let imageUrls = [];
-    let videoUrls = [];
-
-    if (!userId) {
-        return res.status(400).json({ success: false, message: "userId is required." });
-    }
-
-    try {
-        // Fetch user name
+app.post(
+    "/upload",
+    upload.fields([
+      { name: "images", maxCount: 10 },
+      { name: "videos", maxCount: 10 },
+    ]),
+    async (req, res) => {
+      console.log("Files received:", req.files);
+  
+      let { content, userId } = req.body;
+  
+      // Ensure userId is not null, undefined, or an invalid string
+      if (!userId || userId === "null" || userId === "undefined") {
+        return res.status(400).json({ success: false, message: "Valid userId is required." });
+      }
+  
+      try {
+        // Convert userId to a valid ObjectId (if it's a string)
+        if (typeof userId === "string") {
+          const mongoose = require("mongoose");
+          if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ success: false, message: "Invalid userId format." });
+          }
+        }
+  
+        // Fetch user details
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ success: false, message: "User not found." });
+          return res.status(404).json({ success: false, message: "User not found." });
         }
-
+  
+        const uploadToCloudinary = (buffer, resourceType) => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              { resource_type: resourceType },
+              (error, result) => {
+                if (error) {
+                  console.error("Cloudinary Upload Error:", error);
+                  return reject(error);
+                }
+                resolve(result.secure_url);
+              }
+            );
+            stream.end(buffer);
+          });
+        };
+  
         // Upload images
-        if (req.files["images"]) {
-            for (const file of req.files["images"]) {
-                const result = await new Promise((resolve, reject) => {
-                    cloudinary.uploader.upload_stream({ resource_type: "image" }, (error, result) => {
-                        if (error) return reject(error);
-                        resolve(result);
-                    }).end(file.buffer);
-                });
-                imageUrls.push(result.secure_url);
-            }
-        }
-
+        const imageUploads = req.files["images"]
+          ? req.files["images"].map((file) => uploadToCloudinary(file.buffer, "image"))
+          : [];
+  
         // Upload videos
-        if (req.files["videos"]) {
-            for (const file of req.files["videos"]) {
-                const result = await new Promise((resolve, reject) => {
-                    cloudinary.uploader.upload_stream({ resource_type: "video" }, (error, result) => {
-                        if (error) return reject(error);
-                        resolve(result);
-                    }).end(file.buffer);
-                });
-                videoUrls.push(result.secure_url);
-            }
-        }
-
+        const videoUploads = req.files["videos"]
+          ? req.files["videos"].map((file) => uploadToCloudinary(file.buffer, "video"))
+          : [];
+  
+        // Execute all uploads in parallel
+        const imageUrls = await Promise.all(imageUploads);
+        const videoUrls = await Promise.all(videoUploads);
+  
         // Create and save the review
         const newReview = new Review({
-            content,
-            userId, // Store the user's ID
-            userName: user.name, // Store the user's name
-            imageUrl: imageUrls,
-            videoUrl: videoUrls,
+          content,
+          userId,
+          userName: user.name,
+          imageUrl: imageUrls,
+          videoUrl: videoUrls,
         });
-
+  
         await newReview.save();
-        res.status(201).json({ success: true, message: "Review uploaded successfully.", review: newReview });
-    } catch (error) {
+  
+        res.status(201).json({
+          success: true,
+          message: "Review uploaded successfully.",
+          review: newReview,
+        });
+      } catch (error) {
+        console.error("Upload Error:", error);
         res.status(500).json({ success: false, message: "Error uploading review.", error: error.message });
+      }
     }
-});
-
+  );
+  
 // Route to display all reviews
 app.get("/display", async (req, res) => {
     try {
